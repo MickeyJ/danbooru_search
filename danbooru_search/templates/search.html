@@ -1,0 +1,25 @@
+<!-- prettier-ignore -->
+{% extends "base.html" %}
+
+{% block title %}Tag Search{% endblock %}
+
+{% block header %}Prompt Builder{% endblock %}
+
+{% block content %}
+<div class="search-container">
+  <input type="text" id="searchInput" placeholder="Search for tags..." />
+</div>
+<div id="results"></div>
+
+<div class="prompt-builder">
+  <h2>Your Prompt</h2>
+  <div class="prompt-area" id="promptArea"></div>
+  <textarea id="hiddenPromptArea" style="display: none"></textarea>
+  <div class="button-container">
+    <button class="button" id="copyButton">Copy to Clipboard</button>
+    <button class="button danger" id="clearButton">Clear All</button>
+  </div>
+</div>
+{% endblock %} {% block scripts %} {% load static %}
+<script src="{% static 'js/prompt-builder.js' %}"></script>
+{% endblock %}
