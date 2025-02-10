@@ -143,6 +143,26 @@ async def get_letter_distribution(tag_count=None):
     return letter_stats, other_count
 
 
+def is_valid_tag(name):
+    """Check if a tag name is valid"""
+    # Tag should be reasonable length (e.g., less than 100 chars)
+    if len(name) > 100:
+        return False
+
+    # Tag should contain at least one letter or number
+    if not any(c.isalnum() for c in name):
+        return False
+
+    # Tag should only contain allowed characters
+    allowed_chars = set(
+        "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789_-()."
+    )
+    if not all(c in allowed_chars for c in name):
+        return False
+
+    return True
+
+
 async def perform_update():
     """Background task to update tags"""
     try:
@@ -251,7 +271,12 @@ async def perform_update():
                         "page": page,
                     }
 
-                    print(f"\nFetching page {page}...")
+                    # Build and log the full URL with parameters
+                    param_string = "&".join(f"{k}={v}" for k, v in params.items())
+                    full_url = f"{url}?{param_string}"
+                    print(f"\nRequesting: {full_url}")
+
+                    print(f"Fetching page {page}...")
                     async with session.get(url, params=params, timeout=30) as response:
                         if response.status != 200:
                             raise Exception(f"API returned status {response.status}")
@@ -266,15 +291,33 @@ async def perform_update():
                     print(f"Retrieved {batch_size} tags from API")
 
                     # Collect tags for bulk update
-                    new_tags = [
-                        Tag(name=tag_data["name"], post_count=tag_data["post_count"])
-                        for tag_data in tags
-                    ]
+                    new_tags = []
+                    invalid_tags = []
+                    for tag_data in tags:
+                        if is_valid_tag(tag_data["name"]):
+                            new_tags.append(
+                                Tag(
+                                    name=tag_data["name"],
+                                    post_count=tag_data["post_count"],
+                                )
+                            )
+                        else:
+                            invalid_tags.append(tag_data["name"])
+
+                    if invalid_tags:
+                        print(f"\n!!! Found {len(invalid_tags)} invalid tags !!!")
+                        print("Sample of invalid tags:")
+                        for tag in invalid_tags[:5]:
+                            print(f"- {tag}")
+                        print("\nStopping update process due to invalid tags")
+                        print("This might indicate an API issue")
+                        return  # Stop the entire update process
 
                     # Save this page's tags
-                    print(f"\nSaving {len(new_tags)} tags to database...")
-                    await sync_to_async(_bulk_update_tags)(new_tags)
-                    print("Batch saved successfully")
+                    if new_tags:
+                        print(f"\nSaving {len(new_tags)} valid tags to database...")
+                        await sync_to_async(_bulk_update_tags)(new_tags)
+                        print("Batch saved successfully")
 
                     # Update last successful page
                     await sync_to_async(_update_last_page)(page)
