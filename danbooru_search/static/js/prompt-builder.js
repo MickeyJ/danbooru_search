@@ -4,6 +4,7 @@ const promptArea = document.getElementById("promptArea");
 const hiddenPromptArea = document.getElementById("hiddenPromptArea");
 const copyButton = document.getElementById("copyButton");
 const clearButton = document.getElementById("clearButton");
+const updateTagsButton = document.getElementById("updateTagsButton");
 
 let timeoutId;
 searchInput.addEventListener("input", function () {
@@ -146,4 +147,35 @@ clearButton.addEventListener("click", function () {
       localStorage.removeItem("savedPrompt");
     }
   }
+});
+
+// Add update tags functionality
+updateTagsButton.addEventListener("click", function () {
+  console.log("Update button clicked");
+  updateTagsButton.disabled = true;
+  updateTagsButton.textContent = "Updating...";
+
+  fetch("/api/update-tags", {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+    },
+  })
+    .then((response) => response.json())
+    .then((data) => {
+      console.log("Update response:", data);
+      if (data.success) {
+        alert(data.message);
+      } else {
+        throw new Error(data.message || "Update failed");
+      }
+    })
+    .catch((error) => {
+      console.error("Update error:", error);
+      alert("Failed to update tags: " + error.message);
+    })
+    .finally(() => {
+      updateTagsButton.disabled = false;
+      updateTagsButton.textContent = "Update Tags Database";
+    });
 });

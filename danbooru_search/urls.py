@@ -23,4 +23,5 @@ urlpatterns = [
     path("admin/", admin.site.urls),
     path("", views.search_page, name="search_page"),
     path("api/search", views.search_csv, name="search_csv"),
+    path("api/update-tags", views.update_tags, name="update_tags"),
 ]

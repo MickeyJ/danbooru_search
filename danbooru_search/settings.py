@@ -38,7 +38,7 @@ INSTALLED_APPS = [
     "django.contrib.sessions",
     "django.contrib.messages",
     "django.contrib.staticfiles",
-    "danbooru_search",
+    "danbooru_search.apps.DanboruSearchConfig",
 ]
 
 MIDDLEWARE = [
