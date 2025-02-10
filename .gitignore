@@ -104,3 +104,4 @@ cover/
 # Project specific
 /static/
 /media/
+/backups

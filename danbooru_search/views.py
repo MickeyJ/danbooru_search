@@ -12,13 +12,15 @@ import threading
 import asyncio
 import aiohttp
 from django.db import transaction
-from .models import Tag, UpdateStatus
+from .models import Tag, UpdateStatus, CommonWord
 from django.views.decorators.csrf import csrf_exempt  # Temporary for testing
 from django.views.decorators.http import require_http_methods
 import ssl
 from django.core.cache import cache
 from django.utils import timezone
 from django.db.models import Count
+from Levenshtein import distance  # You'll need to pip install python-Levenshtein
+from django.core.management import call_command
 
 # Global task state
 update_task = None
@@ -146,26 +148,54 @@ async def get_letter_distribution(tag_count=None):
 def is_valid_tag(name):
     """Check if a tag name is valid"""
     # Tag should be reasonable length (e.g., less than 100 chars)
-    if len(name) > 100:
-        return False
+    # if len(name) > 150:
+    #     return False
 
     # Tag should contain at least one letter or number
-    if not any(c.isalnum() for c in name):
-        return False
+    # if not any(c.isalnum() for c in name):
+    #     return False
 
     # Tag should only contain allowed characters
-    allowed_chars = set(
-        "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789_-()."
-    )
-    if not all(c in allowed_chars for c in name):
-        return False
+    # allowed_chars = set(
+    #     "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789_-()."
+    # )
+    # if not all(c in allowed_chars for c in name):
+    #     return False
 
     return True
+
+
+def is_likely_typo(word, common_words, max_distance=1):
+    """
+    Check if a word is likely a typo based on Levenshtein distance
+    to common words. Returns (is_typo, suggested_word) tuple.
+    """
+    # Skip very short words as they're more likely to be valid abbreviations
+    if len(word) <= 2:
+        return False, None
+
+    # Only check for very obvious typos with repeated letters
+    if any(
+        c * 3 in word for c in "abcdefghijklmnopqrstuvwxyz"
+    ):  # Three or more of same letter
+        return True, None
+
+    # If the word exists in our dictionary, it's valid
+    if word in common_words:
+        return False, None
+
+    # If we get here, the word isn't in our dictionary
+    return True, None
 
 
 async def perform_update():
     """Background task to update tags"""
     try:
+        # Check if word database is empty
+        if await sync_to_async(CommonWord.objects.count)() == 0:
+            print("Initializing word database...")
+            await sync_to_async(lambda: call_command("init_wordlist"))()
+
         # First, check for duplicates before we start
         print("\n=== Checking for Existing Duplicates ===")
         duplicates = await sync_to_async(
@@ -266,9 +296,9 @@ async def perform_update():
                 try:
                     url = "https://danbooru.donmai.us/tags.json"
                     params = {
-                        "search[order]": "id",  # Order by ID to get sequential pages
+                        "page": page,  # Keep using numeric pages
                         "limit": tags_per_page,
-                        "page": page,
+                        "search[order]": "id_asc",  # Use explicit ascending ID order
                     }
 
                     # Build and log the full URL with parameters
@@ -278,7 +308,10 @@ async def perform_update():
 
                     print(f"Fetching page {page}...")
                     async with session.get(url, params=params, timeout=30) as response:
-                        if response.status != 200:
+                        if response.status == 410:
+                            print("\nReached end of tags")
+                            break
+                        elif response.status != 200:
                             raise Exception(f"API returned status {response.status}")
                         tags = await response.json()
 
@@ -293,7 +326,51 @@ async def perform_update():
                     # Collect tags for bulk update
                     new_tags = []
                     invalid_tags = []
+                    deprecated_count = 0
+                    typo_count = 0
+
+                    # Load common words from database
+                    common_words = set(
+                        await sync_to_async(
+                            lambda: list(
+                                CommonWord.objects.values_list("word", flat=True)
+                            )
+                        )()
+                    )
+
                     for tag_data in tags:
+                        if tag_data.get("is_deprecated", False):
+                            deprecated_count += 1
+                            continue
+
+                        # Check if any words are misspelled or if none are known
+                        has_known_word = False
+                        has_typo = False
+
+                        if "words" in tag_data:
+                            for word in tag_data["words"]:
+                                word = word.lower()
+                                is_typo, _ = is_likely_typo(word, common_words)
+                                if is_typo:
+                                    has_typo = True
+                                    print(
+                                        f"Found typo in tag '{tag_data['name']}': '{word}'"
+                                    )
+                                    break
+                                elif word in common_words:
+                                    has_known_word = True
+
+                        # Skip if there's a typo or if no words are known
+                        if has_typo or (tag_data["words"] and not has_known_word):
+                            if has_typo:
+                                print(f"Skipping tag '{tag_data['name']}' due to typo")
+                            else:
+                                print(
+                                    f"Skipping tag '{tag_data['name']}' - no known words: {', '.join(tag_data['words'])}"
+                                )
+                            typo_count += 1
+                            continue
+
                         if is_valid_tag(tag_data["name"]):
                             new_tags.append(
                                 Tag(
@@ -303,6 +380,11 @@ async def perform_update():
                             )
                         else:
                             invalid_tags.append(tag_data["name"])
+
+                    if deprecated_count:
+                        print(f"Skipped {deprecated_count} deprecated tags")
+                    if typo_count:
+                        print(f"Skipped {typo_count} tags with possible typos")
 
                     if invalid_tags:
                         print(f"\n!!! Found {len(invalid_tags)} invalid tags !!!")
@@ -348,9 +430,12 @@ async def perform_update():
                 except (aiohttp.ClientError, asyncio.TimeoutError) as e:
                     retry_count += 1
                     if retry_count > max_retries:
-                        raise
+                        print(
+                            f"\nFailed after {max_retries} retries. Preserving current data."
+                        )
+                        return  # Don't raise the exception, just exit
 
-                    wait_time = min(2**retry_count, 60)  # Max 60 second wait
+                    wait_time = min(2**retry_count, 60)
                     print(f"\nError: {str(e)}")
                     print(
                         f"Retry {retry_count}/{max_retries} in {wait_time} seconds..."
@@ -409,8 +494,9 @@ async def perform_update():
     except Exception as e:
         print("\n!!! Tag Update Failed !!!")
         print(f"Error: {str(e)}")
-        await sync_to_async(_restore_backup)()
-        raise
+        print("\nPreserving current data - backup restoration skipped")
+        # Don't restore backup automatically
+        return
 
 
 @transaction.atomic
@@ -466,31 +552,59 @@ def _create_backup():
     backup_path = settings.BASE_DIR / "backups"
     backup_path.mkdir(exist_ok=True)
 
-    backup_file = backup_path / f"db_backup_{timestamp}.sqlite3"
+    # Get current tag count
+    tag_count = Tag.objects.count()
+
+    backup_file = backup_path / f"db_backup_{timestamp}_{tag_count}_tags.sqlite3"
 
     # Copy current database to backup
     import shutil
 
     shutil.copy2(settings.DATABASES["default"]["NAME"], backup_file)
-    print(f"\nBackup created: {backup_file}")
+    print(f"\nBackup created: {backup_file} ({tag_count:,} tags)")
 
 
 def _restore_backup():
-    """Restore the most recent backup"""
+    """Restore the most recent backup, but only if it has more tags than current DB"""
     backup_path = settings.BASE_DIR / "backups"
     if not backup_path.exists():
-        return
+        print("\nNo backup directory found")
+        return False
 
-    backups = sorted(backup_path.glob("db_backup_*.sqlite3"))
+    current_count = Tag.objects.count()
+    print(f"\nCurrent database has {current_count:,} tags")
+
+    backups = []
+    for backup in backup_path.glob("db_backup_*.sqlite3"):
+        try:
+            # Extract tag count from filename
+            tag_count = int(backup.stem.split("_")[-2])
+            backups.append((backup, tag_count))
+        except (ValueError, IndexError):
+            continue
+
     if not backups:
-        return
+        print("\nNo valid backups found")
+        return False
 
-    latest_backup = backups[-1]
-    print(f"\nRestoring from backup: {latest_backup}")
+    # Sort by tag count, then by timestamp
+    latest_backup, backup_count = max(
+        backups, key=lambda x: (x[1], x[0].stat().st_mtime)
+    )
+
+    if backup_count < current_count:
+        print(
+            f"\nSkipping backup restoration - current database ({current_count:,} tags) "
+            + f"has more tags than backup ({backup_count:,} tags)"
+        )
+        return False
+
+    print(f"\nRestoring from backup: {latest_backup} ({backup_count:,} tags)")
 
     import shutil
 
     shutil.copy2(latest_backup, settings.DATABASES["default"]["NAME"])
+    return True
 
 
 async def get_actual_count():

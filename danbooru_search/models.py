@@ -42,3 +42,20 @@ class Tag(models.Model):
 
     def __str__(self):
         return self.name
+
+
+class CommonWord(models.Model):
+    word = models.CharField(max_length=100, unique=True)
+    category = models.CharField(
+        max_length=50,
+        choices=[
+            ("english", "English"),
+            ("japanese", "Japanese"),
+            ("proper_noun", "Proper Noun"),
+            ("custom", "Custom Addition"),
+        ],
+    )
+    added_at = models.DateTimeField(auto_now_add=True)
+
+    def __str__(self):
+        return self.word
