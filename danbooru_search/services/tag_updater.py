@@ -25,8 +25,10 @@ class TagUpdater:
 
     async def initialize(self):
         """Initialize required data and services"""
+        print("\nInitializing tag logger...")
         # Start new log file
         self.log_file = self.tag_logger.start_new_log()
+        print("Tag logger initialized")
 
         # Check and initialize word database if empty
         if await sync_to_async(CommonWord.objects.count)() == 0:
@@ -212,3 +214,10 @@ class TagUpdater:
             await sync_to_async(lambda: self.status.save())()
             if self.log_file:
                 self.log_file.close()
+
+            # Generate analysis after update completes or fails
+            print("\nGenerating rejection analysis...")
+            try:
+                await sync_to_async(lambda: call_command("analyze_rejected"))()
+            except Exception as e:
+                print(f"Note: Could not generate analysis: {str(e)}")

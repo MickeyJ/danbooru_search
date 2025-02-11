@@ -130,3 +130,7 @@ DEFAULT_AUTO_FIELD = "django.db.models.BigAutoField"
 
 # Add to the bottom of the file
 STATIC_ROOT = BASE_DIR / "staticfiles"
+
+# Add to your settings.py
+LOGS_DIR = BASE_DIR / "logs"
+LOGS_DIR.mkdir(exist_ok=True)
