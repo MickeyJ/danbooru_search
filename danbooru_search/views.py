@@ -321,7 +321,6 @@ async def perform_update():
 
                     batch_size = len(tags)
                     total_tags_processed += batch_size
-                    print(f"Retrieved {batch_size} tags from API")
 
                     # Collect tags for bulk update
                     new_tags = []
@@ -343,7 +342,7 @@ async def perform_update():
                             deprecated_count += 1
                             continue
 
-                        # Check if any words are misspelled or if none are known
+                        # Check for typos and known words
                         has_known_word = False
                         has_typo = False
 
@@ -353,21 +352,12 @@ async def perform_update():
                                 is_typo, _ = is_likely_typo(word, common_words)
                                 if is_typo:
                                     has_typo = True
-                                    print(
-                                        f"Found typo in tag '{tag_data['name']}': '{word}'"
-                                    )
                                     break
                                 elif word in common_words:
                                     has_known_word = True
 
                         # Skip if there's a typo or if no words are known
                         if has_typo or (tag_data["words"] and not has_known_word):
-                            if has_typo:
-                                print(f"Skipping tag '{tag_data['name']}' due to typo")
-                            else:
-                                print(
-                                    f"Skipping tag '{tag_data['name']}' - no known words: {', '.join(tag_data['words'])}"
-                                )
                             typo_count += 1
                             continue
 

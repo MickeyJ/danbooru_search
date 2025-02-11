@@ -80,7 +80,6 @@ class TagUpdater:
                 if is_typo:
                     has_typo = True
                     typo_words.append(word)
-                    print(f"Found typo in tag '{tag_data['name']}': '{word}'")
                     break
                 elif word in self.common_words:
                     has_known_word = True
@@ -115,7 +114,6 @@ class TagUpdater:
                 if reason == "deprecated":
                     deprecated_count += 1
                 elif reason in ["typo", "no known words"]:
-                    print(f"Skipping tag '{tag_data['name']}' - {reason}")
                     typo_count += 1
                 else:
                     invalid_tags.append(tag_data["name"])
